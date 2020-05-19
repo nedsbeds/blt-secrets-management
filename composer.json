@@ -1,0 +1,19 @@
+{
+  "name": "nedsbeds/blt-secrets-management",
+  "type": "library",
+  "description": "Easy secret management for Acquia BLT.",
+  "license": "GPL-2.0+",
+  "authors":[
+    {
+      "name": "Nick Downton",
+      "role": "Maintainer"
+    }
+  ],
+  "require": {},
+  "extra": {},
+  "autoload": {
+    "psr-4": {
+      "Acquia\\SecretsManagement\\": "./src/"
+    }
+  }
+}

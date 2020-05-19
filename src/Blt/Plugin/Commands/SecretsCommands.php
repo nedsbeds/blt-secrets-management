@@ -16,7 +16,7 @@ class SecretsCommands extends BltTasks {
    *
    * @var string
    */
-  private $pluginRoot = '/vendor/bin/nedsbeds/blt-secrets-management';
+  private $pluginRoot = '/vendor/nedsbeds/blt-secrets-management';
 
   /**
    * Initializes default secrets configuration for this project.

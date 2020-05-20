@@ -187,15 +187,30 @@ class SecretsCommands extends BltTasks {
 
     $secret_vault_location = $this->getConfigValue('repo.root') . "/secrets/secrets_vault";
     $secret_template_location = $this->getConfigValue('repo.root') . "/secrets/secrets.settings.php.j2";
-    $secret_location = '/mnt/files/' . $environments[$drushAlias]['ac-site'] . '.' . $environments[$drushAlias]['ac-env'] . '/secrets.settings.php';
 
-    $command = "ansible-playbook " . $arguments . " " . $playbook .
-      " -i " . $environments[$drushAlias]['host'] . ", -u " . $environments[$drushAlias]['user'] . " \
-      --extra-vars 'drush_alias=" . $drushAlias . " \
-      secret_vault_location=" . $secret_vault_location . " \
-      secret_template_location=" . $secret_template_location . " \
-      secret_location=" . $secret_location . "' "
-      . $this->getVaultPasswordCommand();
+    if (!strstr($drushAlias, 'local')) {
+      $secret_location = '/mnt/files/' . $environments[$drushAlias]['ac-site'] . '.' . $environments[$drushAlias]['ac-env'] . '/secrets.settings.php';
+
+      $command = "ansible-playbook " . $arguments . " " . $playbook .
+        " -i " . $environments[$drushAlias]['host'] . ", -u " . $environments[$drushAlias]['user'] . " \
+        --extra-vars 'drush_alias=" . $drushAlias . " \
+        secret_vault_location=" . $secret_vault_location . " \
+        secret_template_location=" . $secret_template_location . " \
+        secret_location=" . $secret_location . "' "
+        . $this->getVaultPasswordCommand();
+    } else {
+      $secret_location = $this->getConfigValue('repo.root') . '/docroot/sites/default/settings/secrets.settings.local';
+      $local_extra_vars = $this->getConfigValue('repo.root') . '/docroot/sites/default/settings/local.settings.php';
+
+      $command = "ansible-playbook " . $arguments . " " . $playbook . " -i 127.0.0.1, \
+        --extra-vars 'drush_alias=" . $drushAlias . " \
+        secret_vault_location=" . $secret_vault_location . " \
+        secret_template_location=" . $secret_template_location . " \
+        secret_location=" . $secret_location . " \
+        localsettings_location=" . $local_extra_vars . " \
+        ansible_connection=local' "
+        . $this->getVaultPasswordCommand();
+    }
 
     return $command;
   }

@@ -39,7 +39,7 @@ class SecretsCommands extends BltTasks {
         throw new BltException("Could not initialize secrets configuration.");
       }
 
-      $this->taskExec("ansible-vault encrypt $this->pluginRoot/ansible/secrets_vault.yml --ask-vault-pass --output secrets/secrets_vault")->run();
+      $this->taskExec("ansible-vault encrypt " . $this->getConfigValue('repo.root') . "$this->pluginRoot/ansible/secrets_vault.yml --ask-vault-pass --output secrets/secrets_vault")->run();
 
       $this->say("<info>A New ansible-vault and template were copied to your repository.</info>");
       $this->say("<info>Run 'blt secrets:edit' to edit your vault.</info>");

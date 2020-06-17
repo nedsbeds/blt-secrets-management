@@ -248,6 +248,7 @@ class SecretsCommands extends BltTasks {
         secret_vault_location=" . $secret_vault_location . " \
         secret_template_location=" . $secret_template_location . " \
         secret_location=" . $secret_location . " \
+        secret_location_dir=" . dirname($secret_location) . " \
         localsettings_location=" . $local_extra_vars . " \
         ansible_connection=local' "
         . $this->getVaultPasswordCommand();

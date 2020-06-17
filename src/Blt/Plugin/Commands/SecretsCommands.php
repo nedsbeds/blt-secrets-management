@@ -19,6 +19,47 @@ class SecretsCommands extends BltTasks {
   private $pluginRoot = '/vendor/nedsbeds/blt-secrets-management';
 
   /**
+   * The secrets PHP file name.
+   *
+   * @var string
+   */
+  protected $secretsPhpFile = 'secrets.settings.php';
+
+  /**
+   * The ansible vault base file name.
+   *
+   * @var string
+   */
+  protected $vaultFile = 'secrets_vault';
+
+  /**
+   * The BLT command to edit the secrets vault.
+   *
+   * @var string
+   */
+  protected $editCommand = 'blt secrets:edit';
+
+  /**
+   * The ansible playbook file name.
+   * @var string
+   */
+  protected $playbookFile = 'deploy-secrets.yml';
+
+  /**
+   * The ansible playbook file name.
+   *
+   * @var string
+   */
+  protected $playbookConfigKey = 'secrets.playbook';
+
+  /**
+   * Path to the local secrets file.
+   *
+   * @var string
+   */
+  protected $localSecretsPath = '/docroot/sites/default/settings/secrets.settings.local';
+
+  /**
    * Initializes default secrets configuration for this project.
    *
    * @command secrets:vault:init
@@ -29,7 +70,7 @@ class SecretsCommands extends BltTasks {
     if ($this->confirm("<error>Are you sure you want to initialise? This will overwrite any existing encrypted vaults</error>", FALSE)) {
 
       $result = $this->taskFilesystemStack()
-        ->copy($this->getConfigValue('repo.root') . $this->pluginRoot . '/ansible/secrets.settings.php.j2', $this->getConfigValue('repo.root') . '/secrets/secrets.settings.php.j2', TRUE)
+        ->copy($this->getConfigValue('repo.root') . $this->pluginRoot . '/ansible/' . $this->secretsPhpFile .'.j2', $this->getConfigValue('repo.root') . '/secrets/' . $this->secretsPhpFile .'.j2', TRUE)
         ->copy($this->getConfigValue('repo.root') . $this->pluginRoot . '/ansible/.gitignore', $this->getConfigValue('repo.root') . '/secrets/.gitignore', TRUE)
         ->stopOnFail()
         ->setVerbosityThreshold(VerbosityThresholdInterface::VERBOSITY_VERBOSE)
@@ -42,7 +83,7 @@ class SecretsCommands extends BltTasks {
       $this->taskExec("ansible-vault encrypt " . $this->getConfigValue('repo.root') . "$this->pluginRoot/ansible/secrets_vault.yml --ask-vault-pass --output secrets/secrets_vault")->run();
 
       $this->say("<info>A New ansible-vault and template were copied to your repository.</info>");
-      $this->say("<info>Run 'blt secrets:edit' to edit your vault.</info>");
+      $this->say("<info>Run '$this->editCommand' to edit your vault.</info>");
     }
   }
 
@@ -81,7 +122,7 @@ class SecretsCommands extends BltTasks {
    * @throws \Acquia\Blt\Robo\Exceptions\BltException
    */
   public function secretsEdit() {
-    $command = "ansible-vault edit secrets/secrets_vault" . $this->getVaultPasswordCommand();
+    $command = "ansible-vault edit secrets/$this->vaultFile" . $this->getVaultPasswordCommand();
     $this->taskExec($command)->run();
   }
 
@@ -182,14 +223,14 @@ class SecretsCommands extends BltTasks {
    *   Full command for running the ansible playbook.
    */
   private function getPlaybookCommand($drushAlias, array $environments, $arguments = "") {
-    $defaultPlaybook = $this->getConfigValue('repo.root') . $this->pluginRoot . "/ansible/deploy-secrets.yml";
-    $playbook = $this->getConfigValue('secrets.playbook', $defaultPlaybook);
+    $defaultPlaybook = $this->getConfigValue('repo.root') . $this->pluginRoot . "/ansible/$this->playbookFile";
+    $playbook = $this->getConfigValue($this->playbookConfigKey, $defaultPlaybook);
 
-    $secret_vault_location = $this->getConfigValue('repo.root') . "/secrets/secrets_vault";
-    $secret_template_location = $this->getConfigValue('repo.root') . "/secrets/secrets.settings.php.j2";
+    $secret_vault_location = $this->getConfigValue('repo.root') . "/secrets/$this->vaultFile";
+    $secret_template_location = $this->getConfigValue('repo.root') . "/secrets/$this->secretsPhpFile.j2";
 
     if (!strstr($drushAlias, 'local')) {
-      $secret_location = '/mnt/files/' . $environments[$drushAlias]['ac-site'] . '.' . $environments[$drushAlias]['ac-env'] . '/secrets.settings.php';
+      $secret_location = '/mnt/files/' . $environments[$drushAlias]['ac-site'] . '.' . $environments[$drushAlias]['ac-env'] . '/'. $this->secretsPhpFile;
 
       $command = "ansible-playbook " . $arguments . " " . $playbook .
         " -i " . $environments[$drushAlias]['host'] . ", -u " . $environments[$drushAlias]['user'] . " \
@@ -199,7 +240,7 @@ class SecretsCommands extends BltTasks {
         secret_location=" . $secret_location . "' "
         . $this->getVaultPasswordCommand();
     } else {
-      $secret_location = $this->getConfigValue('repo.root') . '/docroot/sites/default/settings/secrets.settings.local';
+      $secret_location = $this->getConfigValue('repo.root') . $this->localSecretsPath;
       $local_extra_vars = $this->getConfigValue('repo.root') . '/docroot/sites/default/settings/local.settings.php';
 
       $command = "ansible-playbook " . $arguments . " " . $playbook . " -i 127.0.0.1, \

@@ -88,6 +88,10 @@ To make dealing with the vault easier, you can run `secrets:keychain:init` which
 
 The imagined workflow for this tool is 
 
+## Integration with SimpleSAMLPHP
+
+If you have a need to secretly store config for a SimpleSAMLPHP app integration, see [simplesamlphp_readme.md](simplesamlphp_readme.md).
+
 # License
 
 This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License version 2 as published by the Free Software Foundation.

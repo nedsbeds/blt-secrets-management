@@ -103,14 +103,22 @@ class SecretsCommands extends BltTasks {
     $environments = $this->getEnvironments();
 
     if (isset($environments[$drushAlias])) {
-      $ansibleCommand = $this->getPlaybookCommand(
-        $drushAlias,
-        $environments,
-        "-CD"
-      );
+      $this->say("<info>Running diff against primary secrets file.</info>");
+
+      $ansibleCommand = $this->getPlaybookCommand($drushAlias, $environments, "-CD");
 
       $this->taskExec($ansibleCommand)
         ->run();
+
+      // If this is an ACSF project so also run on the ACSF Update env settings file.
+      if ($this->getConfigValue('secrets.deploy-to-acsf-update')) {
+        $this->say("<info>Running diff against ACSF update environment secrets file.</info>");
+
+        $ansibleCommand = $this->getPlaybookCommand($drushAlias, $environments, "-CD", "up");
+
+        $this->taskExec($ansibleCommand)
+          ->run();
+      }
     } else {
       throw new BltException("Could not find Drush alias");
     }
@@ -130,8 +138,21 @@ class SecretsCommands extends BltTasks {
     $environments = $this->getEnvironments();
 
     if (isset($environments[$drushAlias])) {
+      $this->say("<info>Running deploy against primary secrets file.</info>");
+
       $ansibleCommand = $this->getPlaybookCommand($drushAlias, $environments);
       $this->taskExec($ansibleCommand)->run();
+
+      // If this is an ACSF project so also run on the ACSF Update env settings file.
+      if ($this->getConfigValue('secrets.deploy-to-acsf-update')) {
+        $this->say("<info>Running deploy against ACSF update environment secrets file.</info>");
+
+        $ansibleCommand = $this->getPlaybookCommand($drushAlias, $environments, "", "up");
+
+        $this->taskExec($ansibleCommand)
+          ->run();
+      }
+
     } else {
       throw new BltException("Could not find Drush alias");
     }
@@ -182,18 +203,14 @@ class SecretsCommands extends BltTasks {
     return $this->environments;
   }
 
-  private function getSecretsRemoteLocation($drushAlias) {
-    $secrets_remote_location = $this->getConfigValue('secrets.settings-remote-location');
+  private function getSecretsRemoteLocation($drushAlias, $remotePathModifier = "") {
     $environments = $this->getEnvironments();
 
-    if (!is_null($secrets_remote_location)) {
-      return $secrets_remote_location;
-    } else if (is_null($secrets_remote_location) && isset($environments[$drushAlias]['ac-site']) && isset($environments[$drushAlias]['ac-env'])) {
+    if (isset($environments[$drushAlias]['ac-site']) && isset($environments[$drushAlias]['ac-env'])) {
       // We can calculate the expected location from drush alias.
-      return '/mnt/files/' . $environments[$drushAlias]['ac-site'] . '.' . $environments[$drushAlias]['ac-env'] . '/secrets.settings.php';
+      return '/mnt/files/' . $environments[$drushAlias]['ac-site'] . '.' . $environments[$drushAlias]['ac-env'] . $remotePathModifier . '/secrets.settings.php';
     } else {
-      // Could not calculate location and was not set explicitly.
-      throw new BltException("Could not determine the secrets.settings.php remote location. Please define in BLT config 'secrets.settings-remote-location'");
+      return '/mnt/files/' . $environments[$drushAlias]['user'] . $remotePathModifier . '/secrets.settings.php';
     }
   }
 
@@ -204,23 +221,25 @@ class SecretsCommands extends BltTasks {
    *   The Drush alias.
    * @param array $environments
    *   Full list of environments from SecurityCommands::getEnvironments().
-   * @param string $arguments
+   * @param string $anisbleArguments
    *   Any extra arguments to ansible-playbook command.
+   * @param string $remotePathModifier
+   *   A string to append to the remote settings location identifier.
    *
    * @return string
    *   Full command for running the ansible playbook.
    */
-  private function getPlaybookCommand($drushAlias, array $environments, $arguments = "") {
+  private function getPlaybookCommand($drushAlias, array $environments, $ansibleArguments = "", $remotePathModifier = "") {
     $defaultPlaybook = $this->getConfigValue('repo.root') . $this->pluginRoot . "/ansible/deploy-secrets.yml";
     $playbook = $this->getConfigValue('secrets.playbook', $defaultPlaybook);
 
     $secrets_vault_location = $this->getConfigValue('repo.root') . "/secrets/secrets_vault";
     $secrets_template_location = $this->getConfigValue('repo.root') . "/secrets/secrets.settings.php.j2";
 
-    $secrets_remote_location = $this->getSecretsRemoteLocation($drushAlias);
-    var_dump($secrets_remote_location);
+    $secrets_remote_location = $this->getSecretsRemoteLocation($drushAlias, $remotePathModifier);
+
     if (!strstr($drushAlias, 'local')) {
-      $command = "ansible-playbook " . $arguments . " " . $playbook .
+      $command = "ansible-playbook " . $ansibleArguments . " " . $playbook .
         " -i " . $environments[$drushAlias]['host'] . ", -u " . $environments[$drushAlias]['user'] . " \
         --extra-vars 'drush_alias=" . $drushAlias . " \
         secret_vault_location=" . $secrets_vault_location . " \
@@ -231,7 +250,7 @@ class SecretsCommands extends BltTasks {
       $secrets_local_location = $this->getConfigValue('repo.root') . '/docroot/sites/default/settings/secrets.settings.local';
       $local_extra_vars = $this->getConfigValue('repo.root') . '/docroot/sites/default/settings/local.settings.php';
 
-      $command = "ansible-playbook " . $arguments . " " . $playbook . " -i 127.0.0.1, \
+      $command = "ansible-playbook " . $ansibleArguments . " " . $playbook . " -i 127.0.0.1, \
         --extra-vars 'drush_alias=" . $drushAlias . " \
         secret_vault_location=" . $secrets_vault_location . " \
         secret_template_location=" . $secrets_template_location . " \

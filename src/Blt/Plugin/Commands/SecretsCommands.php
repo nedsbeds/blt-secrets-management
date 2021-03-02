@@ -38,6 +38,7 @@ class SecretsCommands extends BltTasks {
             $result = $this->taskFilesystemStack()
                 ->copy($this->getConfigValue('repo.root') . $this->pluginRoot . '/ansible/secrets.settings.php.j2', $this->getConfigValue('repo.root') . '/secrets/secrets.settings.php.j2', TRUE)
                 ->copy($this->getConfigValue('repo.root') . $this->pluginRoot . '/ansible/.gitignore', $this->getConfigValue('repo.root') . '/secrets/.gitignore', TRUE)
+                ->mkdir($this->getConfigValue('repo.root') . '/secrets/files/common/')
                 ->stopOnFail()
                 ->setVerbosityThreshold(VerbosityThresholdInterface::VERBOSITY_VERBOSE)
                 ->run();
@@ -90,6 +91,31 @@ class SecretsCommands extends BltTasks {
     public function secretsEdit() {
         $command = "ansible-vault edit secrets/secrets_vault" . $this->getVaultPasswordCommand();
         $this->taskExec($command)->run();
+    }
+
+
+    /**
+     * Encrypt all ad-hoc files.
+     *
+     * @command secrets:encryptfiles
+     * @aliases enfl
+     * @throws \Acquia\Blt\Robo\Exceptions\BltException
+     */
+    public function encryptFiles() {
+        $iterator = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator('secrets/files'));
+        $files = [];
+
+        foreach ($iterator as $file) {
+            if ($file->isDir()){ continue; }
+            // Check if the file is already envcypted.
+            if (strpos(file_get_contents($file),'$ANSIBLE_VAULT') === 0) { continue; }
+
+            $files[] = $file->getPathname();
+        }
+        $filelist = implode(" ", $files);
+
+        $this->taskExec("ansible-vault encrypt $filelist --ask-vault-pass")->run();
+
     }
 
     /**
@@ -182,19 +208,31 @@ class SecretsCommands extends BltTasks {
         return $this->environments;
     }
 
-    private function getSecretsRemoteLocation($drushAlias) {
+    private function getSecretsRemoteLocation($drushAlias)
+    {
         $secrets_remote_location = $this->getConfigValue('secrets.settings-remote-location');
         $environment = $this->getEnvironmentFacts($drushAlias);
 
-        if (!is_null($secrets_remote_location)) {
-            return $secrets_remote_location;
-        } else if (is_null($secrets_remote_location) && isset($environment['ac-site']) && isset($environment['ac-env'])) {
-            // We can calculate the expected location from drush alias.
-            return '/mnt/files/' . $environment['ac-site'] . '.' . $environment['ac-env'] . '/secrets.settings.php';
+        $locations = [];
+        if (isset($environment['ac_site']) && isset($environment['ac_env'])) {
+            $locations['env_path'] = '/mnt/files/' . $environment['ac_site'] . '.' . $environment['ac_env'] . "/";
         } else {
             // Could not calculate location and was not set explicitly.
             throw new BltException("Could not determine the secrets.settings.php remote location. Please define in BLT config 'secrets.settings-remote-location'");
         }
+
+        if (isset($environment['ac_update_env'])) {
+            $locations['update_env_path'] = '/mnt/files/' . $environment['ac_site'] . '.' . $environment['ac_update_env'] . "/";
+        }
+
+        if (!is_null($secrets_remote_location)) {
+            $locations['secret_location'] = $secrets_remote_location;
+        } else {
+            // Default is just in the root of the environment directory
+            $locations['secret_location'] = 'secrets.settings.php';
+        }
+
+        return $locations;
     }
 
     /**
@@ -214,16 +252,73 @@ class SecretsCommands extends BltTasks {
 
         $facts = [
             'alias' => $drushAlias,
-            'ac-site' => $acSite,
-            'ac-env' => $acEnv,
+            'ac_site' => $acSite,
+            'ac_env' => $acEnv,
             'stack' => preg_replace('/\D/', '', $acEnv),
-            'stack-env' => preg_replace('/\d/', '', $acEnv)
+            'stack_env' => preg_replace('/\d/', '', $acEnv)
         ];
 
         // Set a value for local.
-        if ($facts['stack'] == "") { $facts['stack'] = "00";}
+        if ($facts['stack'] == "") {
+            $facts['stack'] = "00";
+        }
+
+        // Set the update environment identifier if this is an ACSF project.
+        // Mimics the environment detector logic but without requiring Drupal to be bootstrapped.
+        if (file_exists($this->getConfigValue('repo.root') . "/docroot/sites/g")) {
+            $facts['ac_update_env'] = $facts['ac_env'] . "up";
+        }
+
 
         return $facts;
+    }
+
+    /**
+     * Gather the list of files, combining different directories in to one array
+     *
+     * @return array $files
+     */
+    private function getEncryptedFiles($drushAlias) {
+
+        $files = [];
+        $environmentFacts = $this->getEnvironmentFacts($drushAlias);
+
+
+        // Construct the list and precedence of different directories files can be added to.
+        $fileOverridePaths = [
+            'common',
+            $environmentFacts['alias'],
+            $environmentFacts['ac_site'],
+            $environmentFacts['ac_env'],
+            $environmentFacts['stack'],
+            $environmentFacts['stack_env']
+        ];
+
+        // Loop through each directory and look for files.
+        foreach ($fileOverridePaths as $overridePath) {
+            $basePath = 'secrets/files/' . $overridePath . "/";
+
+            // Check the directory exists.
+            if (is_dir($basePath)) {
+                $iterator = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($basePath));
+
+                foreach ($iterator as $file) {
+                    if ($file->isDir()) {
+                        continue;
+                    }
+
+                    // Add to the overall list of files overwriting any needed.
+                    $fileId = str_replace($basePath, "", $file->getPathname());
+                    $files[$fileId] = $file->getPathname();
+                }
+            }
+        }
+
+        if( count($files) > 0) {
+            return $files;
+        } else {
+            return false;
+        }
     }
 
     /**
@@ -246,28 +341,53 @@ class SecretsCommands extends BltTasks {
         $secrets_vault_location = $this->getConfigValue('repo.root') . "/secrets/secrets_vault";
         $secrets_template_location = $this->getConfigValue('repo.root') . "/secrets/secrets.settings.php.j2";
 
+        // Detailed set of variables that describe our environment.
         $environmentFacts = $this->getEnvironmentFacts($drushAlias);
+        // Information about where we are going to place our secrets file on current env.
+        $secretsRemoteLocation = $this->getSecretsRemoteLocation($drushAlias);
+        // Get the list of files we need to deploy.
+        $files = $this->getEncryptedFiles($drushAlias);
 
-        $extraVars = " --extra-vars 'drush_alias=" . $drushAlias . " \
-        ac-site=" . $environmentFacts['ac-site'] . " \
-        ac-env=" . $environmentFacts['ac-env'] . " \
-        stack=" . $environmentFacts['stack'] . " \
-        stack-env=" . $environmentFacts['stack-env'] . " \
-        secret_vault_location=" . $secrets_vault_location . " \
-        secret_template_location=" . $secrets_template_location . " \
-        ";
+        $extraVars = [
+            'drush_alias' => $environmentFacts['alias'],
+            'ac_site' => $environmentFacts['ac_site'],
+            'ac_env' => $environmentFacts['ac_env'],
+            'stack=' => $environmentFacts['stack'],
+            'stack_env' => $environmentFacts['stack_env'],
+            'secret_vault_location' => $secrets_vault_location,
+            'secret_template_location' => $secrets_template_location,
+            'env_path' => $secretsRemoteLocation['env_path'],
+        ];
 
-        if (!strstr($drushAlias, 'local')) {
-            $host = " -i " . $environments[$drushAlias]['host'] . ", -u " . $environments[$drushAlias]['user'];
-            $extraVars .= "secret_location=" . $this->getSecretsRemoteLocation($drushAlias) . "' ";
-        } else {
-            $host = " -i 127.0.0.1";
-            $extraVars .= "secret_location=" . $this->getConfigValue('repo.root') . '/docroot/sites/default/settings/secrets.settings.local' . " \
-        localsettings_location=" . $this->getConfigValue('repo.root') . '/docroot/sites/default/settings/local.settings.php' . " \
-        ansible_connection=local' ";
+        // In ACSF sites we pass some extra variables.
+        if (isset($environmentFacts['ac_update_env'])) {
+            $extraVars['ac_update_env'] = $environmentFacts['ac_update_env'];
+            $extraVars['update_env_path'] = $secretsRemoteLocation['update_env_path'];
         }
 
-        $command = "ansible-playbook " . $arguments . " " . $playbook . $host . $extraVars . $this->getVaultPasswordCommand();
+        // Add the list of files and corresponding destinations
+        if ($files !== false) {
+            $extraVars['file_srcs'] = array_values($files);
+            $extraVars['file_dests'] = array_keys($files);
+        }
+
+        // The connection string on local is different.
+        // The localsettings_location variable defines where we want an include for our templated file.
+        if (!strstr($drushAlias, 'local')) {
+            $host = " -i " . $environments[$drushAlias]['host'] . ", -u " . $environments[$drushAlias]['user'];
+            $extraVars['secret_location'] = $secretsRemoteLocation['secret_location'];
+        } else {
+            $host = " -i 127.0.0.1";
+            $extraVars['secret_location'] = $this->getConfigValue('repo.root') . '/docroot/sites/default/settings/secrets.settings.local';
+            $extraVars['localsettings_location'] = $this->getConfigValue('repo.root') . '/docroot/sites/default/settings/local.settings.php';
+            $extraVars['ansible_connection'] = 'local';
+        }
+
+        $extraVarsEncoded = " --extra-vars '" . json_encode($extraVars) . "' ";
+
+        $command = "ansible-playbook " . $arguments . " " . $playbook . $host . $extraVarsEncoded . $this->getVaultPasswordCommand();
+
+        $this->say("<info>Computed Variables:\n" . print_r($extraVars, true) . "</info>");
 
         return $command;
     }

@@ -266,7 +266,11 @@ class SecretsCommands extends BltTasks {
         // Set the update environment identifier if this is an ACSF project.
         // Mimics the environment detector logic but without requiring Drupal to be bootstrapped.
         if (file_exists($this->getConfigValue('repo.root') . "/docroot/sites/g")) {
-            $facts['ac_update_env'] = $facts['ac_env'] . "up";
+            if ($facts['stack_env'] == 'live') {
+                $facts['ac_update_env'] = $facts['stack'] . "update";
+              } else {
+                $facts['ac_update_env'] = $facts['ac_env'] . "up";
+              }
         }
 
 
